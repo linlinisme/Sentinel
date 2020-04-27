@@ -25,12 +25,9 @@ import com.alibaba.csp.sentinel.log.RecordLog;
 import com.alibaba.csp.sentinel.slots.block.BlockException;
 import org.apache.dubbo.common.extension.Activate;
 import org.apache.dubbo.rpc.Invocation;
-import org.apache.dubbo.rpc.InvokeMode;
 import org.apache.dubbo.rpc.Invoker;
 import org.apache.dubbo.rpc.Result;
-import org.apache.dubbo.rpc.RpcContext;
 import org.apache.dubbo.rpc.RpcException;
-import org.apache.dubbo.rpc.support.RpcUtils;
 
 import static org.apache.dubbo.common.constants.CommonConstants.CONSUMER;
 
@@ -53,35 +50,13 @@ public class SentinelDubboConsumerFilter extends BaseSentinelDubboFilter {
     }
 
     @Override
-    String getMethodName(Invoker invoker, Invocation invocation) {
-        return DubboUtils.getResourceName(invoker, invocation, DubboConfig.getDubboConsumerPrefix());
-    }
-
-    @Override
-    String getInterfaceName(Invoker invoker) {
-        return DubboUtils.getInterfaceName(invoker);
-    }
-
-    @Override
     public Result invoke(Invoker<?> invoker, Invocation invocation) throws RpcException {
-        Entry interfaceEntry = null;
-        Entry methodEntry = null;
-        RpcContext rpcContext = RpcContext.getContext();
+        String methodResourceName = DubboUtils.getResourceName(invoker, invocation, DubboConfig.getDubboConsumerPrefix());
+        String interfaceResourceName = DubboUtils.getInterfaceName(invoker);
         try {
-            String methodResourceName = getMethodName(invoker, invocation);
-            String interfaceResourceName = getInterfaceName(invoker);
-            InvokeMode invokeMode = RpcUtils.getInvokeMode(invoker.getUrl(), invocation);
-
-            if (InvokeMode.SYNC == invokeMode) {
-                interfaceEntry = SphU.entry(interfaceResourceName, ResourceTypeConstants.COMMON_RPC, EntryType.OUT);
-                methodEntry = SphU.entry(methodResourceName, ResourceTypeConstants.COMMON_RPC, EntryType.OUT, invocation.getArguments());
-            } else {
-                // should generate the AsyncEntry when the invoke model in future or async
-                interfaceEntry = SphU.asyncEntry(interfaceResourceName, ResourceTypeConstants.COMMON_RPC, EntryType.OUT);
-                methodEntry = SphU.asyncEntry(methodResourceName, ResourceTypeConstants.COMMON_RPC, EntryType.OUT, 1, invocation.getArguments());
-            }
-            rpcContext.set(methodResourceName, new Entry[]{interfaceEntry, methodEntry});
-            return invoker.invoke(invocation);
+            final Entry interfaceEntry = SphU.asyncEntry(interfaceResourceName, ResourceTypeConstants.COMMON_RPC, EntryType.OUT);
+            final Entry methodEntry = SphU.asyncEntry(methodResourceName, ResourceTypeConstants.COMMON_RPC, EntryType.OUT, 1, invocation.getArguments());
+            return wrapResult(invoker.invoke(invocation), interfaceEntry, methodEntry, false);
         } catch (BlockException e) {
             return DubboFallbackRegistry.getConsumerFallback().handle(invoker, invocation, e);
         }
